@@ -96,6 +96,14 @@ func Scrape() ([]models.Listing, error) {
 				log.Printf("[card %d] skipped — no year (likely a part/accessory): %s", i, listing.Title)
 				return
 			}
+			if listing.Price < 1000 {
+				log.Printf("[card %d] skipped — price too low (CI$%.0f): %s", i, listing.Price, listing.Title)
+				return
+			}
+			if strings.Contains(strings.ToLower(listing.Title), "price upon request") {
+				log.Printf("[card %d] skipped — price upon request: %s", i, listing.Title)
+				return
+			}
 			listings = append(listings, listing)
 		}()
 	}
