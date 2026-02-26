@@ -43,26 +43,40 @@ func UpsertListing(ctx context.Context, pool *pgxpool.Pool, l models.Listing) (U
 	err = pool.QueryRow(ctx, `
 		INSERT INTO listings
 			(external_id, url, title, make, model, year, mileage, price, currency,
-			 images, location, is_active, last_seen)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,NOW())
+			 images, location, condition, transmission, fuel_type, color,
+			 body_type, drive, cylinders, steering, interior_color, doors, on_island,
+			 is_active, last_seen)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,TRUE,NOW())
 		ON CONFLICT (external_id) DO UPDATE SET
-			url          = EXCLUDED.url,
-			title        = EXCLUDED.title,
-			make         = EXCLUDED.make,
-			model        = EXCLUDED.model,
-			year         = EXCLUDED.year,
-			mileage      = EXCLUDED.mileage,
-			price        = EXCLUDED.price,
-			currency     = EXCLUDED.currency,
-			images       = EXCLUDED.images,
-			location     = EXCLUDED.location,
-			is_active    = TRUE,
-			last_seen    = NOW(),
-			updated_at   = NOW()
+			url            = EXCLUDED.url,
+			title          = EXCLUDED.title,
+			make           = EXCLUDED.make,
+			model          = EXCLUDED.model,
+			year           = EXCLUDED.year,
+			mileage        = EXCLUDED.mileage,
+			price          = EXCLUDED.price,
+			currency       = EXCLUDED.currency,
+			images         = EXCLUDED.images,
+			location       = EXCLUDED.location,
+			condition      = EXCLUDED.condition,
+			transmission   = EXCLUDED.transmission,
+			fuel_type      = EXCLUDED.fuel_type,
+			color          = EXCLUDED.color,
+			body_type      = EXCLUDED.body_type,
+			drive          = EXCLUDED.drive,
+			cylinders      = EXCLUDED.cylinders,
+			steering       = EXCLUDED.steering,
+			interior_color = EXCLUDED.interior_color,
+			doors          = EXCLUDED.doors,
+			on_island      = EXCLUDED.on_island,
+			is_active      = TRUE,
+			last_seen      = NOW(),
+			updated_at     = NOW()
 		RETURNING id`,
 		l.ExternalID, l.URL, l.Title, l.Make, l.Model,
 		l.Year, l.Mileage, l.Price, l.Currency,
-		l.Images, l.Location,
+		l.Images, l.Location, l.Condition, l.Transmission, l.FuelType, l.Color,
+		l.BodyType, l.Drive, l.Cylinders, l.Steering, l.InteriorColor, l.Doors, l.OnIsland,
 	).Scan(&returnedID)
 	if err != nil {
 		return res, fmt.Errorf("upsert listing %s: %w", l.ExternalID, err)
@@ -90,7 +104,9 @@ func GetListings(ctx context.Context, pool *pgxpool.Pool) ([]models.Listing, err
 			id, external_id, url, title,
 			make, model, year, mileage,
 			price, currency, condition, transmission,
-			fuel_type, color, description, images,
+			fuel_type, color, body_type, drive,
+			cylinders, steering, interior_color, doors, on_island,
+			description, images,
 			location, seller_name, is_active,
 			first_seen, last_seen, created_at, updated_at
 		FROM listings
@@ -106,10 +122,12 @@ func GetListings(ctx context.Context, pool *pgxpool.Pool) ([]models.Listing, err
 	for rows.Next() {
 		var (
 			l models.Listing
-			// Nullable text columns — scan into *string, convert to string after.
+			// Nullable text columns.
 			make_, model_, condition_, transmission_ *string
-			fuelType_, color_, description_          *string
-			location_, sellerName_                   *string
+			fuelType_, color_, bodyType_, drive_     *string
+			cylinders_, steering_, interiorColor_    *string
+			doors_, description_, location_          *string
+			sellerName_                              *string
 			// Nullable timestamptz columns.
 			firstSeen_, lastSeen_, createdAt_, updatedAt_ *time.Time
 		)
@@ -118,7 +136,9 @@ func GetListings(ctx context.Context, pool *pgxpool.Pool) ([]models.Listing, err
 			&l.ID, &l.ExternalID, &l.URL, &l.Title,
 			&make_, &model_, &l.Year, &l.Mileage,
 			&l.Price, &l.Currency, &condition_, &transmission_,
-			&fuelType_, &color_, &description_, &l.Images,
+			&fuelType_, &color_, &bodyType_, &drive_,
+			&cylinders_, &steering_, &interiorColor_, &doors_, &l.OnIsland,
+			&description_, &l.Images,
 			&location_, &sellerName_, &l.IsActive,
 			&firstSeen_, &lastSeen_, &createdAt_, &updatedAt_,
 		)
@@ -132,6 +152,12 @@ func GetListings(ctx context.Context, pool *pgxpool.Pool) ([]models.Listing, err
 		l.Transmission = strVal(transmission_)
 		l.FuelType = strVal(fuelType_)
 		l.Color = strVal(color_)
+		l.BodyType = strVal(bodyType_)
+		l.Drive = strVal(drive_)
+		l.Cylinders = strVal(cylinders_)
+		l.Steering = strVal(steering_)
+		l.InteriorColor = strVal(interiorColor_)
+		l.Doors = strVal(doors_)
 		l.Description = strVal(description_)
 		l.Location = strVal(location_)
 		l.SellerName = strVal(sellerName_)

@@ -162,10 +162,8 @@ func scrapePage(browser *rod.Browser, url string, pageNum int) (listings []model
 				log.Printf("[page %d / card %d] skip — price upon request", pageNum, i)
 				return
 			}
-			// Fetch mileage from the detail page when it wasn't in the card text.
-			if l.Mileage == nil {
-				l.Mileage = fetchMileageFromDetail(browser, l.URL, pageNum, i)
-			}
+			// Always fetch the detail page to capture all structured fields.
+			fetchAndApplyDetailFields(browser, &l, pageNum, i)
 			listings = append(listings, l)
 		}()
 	}
@@ -173,42 +171,107 @@ func scrapePage(browser *rod.Browser, url string, pageNum int) (listings []model
 	return listings, hasNext, rawCount, nil
 }
 
-// fetchMileageFromDetail opens the individual listing page and extracts
-// mileage from the full page text. Returns nil on any failure.
-func fetchMileageFromDetail(browser *rod.Browser, url string, pageNum, cardIdx int) *int {
+// detailJS is the JavaScript injected into each listing detail page.
+// It extracts key→value pairs from the "Ad Details" section using three
+// strategies (DOM structure, dt/dd pairs, line-by-line text), ensuring the
+// best possible coverage regardless of minor HTML changes.
+const detailJS = `() => {
+const known = new Set([
+  'body type','cylinders','make','drive','fuel type','transmission',
+  'steering','exterior color','interior color','doors','on island',
+  'condition','mileage','year'
+]);
+const fields = {};
+
+// ── Strategy 1: container elements holding a bold label + sibling value ──
+// Covers div-per-field patterns like: <div><strong>Label</strong><p>Value</p></div>
+const bolds = document.querySelectorAll('strong, b, dt');
+for (const el of bolds) {
+  const label = el.textContent.trim().toLowerCase().replace(/:$/, '');
+  if (!known.has(label)) continue;
+  if (fields[label]) continue; // already found via a prior strategy
+  // Try: next sibling element, parent's next sibling, or parent's next sibling's child.
+  const candidates = [
+    el.nextElementSibling,
+    el.parentElement && el.parentElement.nextElementSibling,
+    el.parentElement && el.parentElement.nextElementSibling &&
+      el.parentElement.nextElementSibling.firstElementChild,
+  ];
+  for (const c of candidates) {
+    if (c && c !== el) {
+      const v = c.textContent.trim();
+      if (v && v.length < 80 && !v.includes('\n')) { fields[label] = v; break; }
+    }
+  }
+}
+
+// ── Strategy 2: explicit dt/dd pairs ──
+document.querySelectorAll('dt').forEach(dt => {
+  const label = dt.textContent.trim().toLowerCase().replace(/:$/, '');
+  const dd = dt.nextElementSibling;
+  if (known.has(label) && dd && !fields[label]) {
+    fields[label] = dd.textContent.trim();
+  }
+});
+
+// ── Strategy 3: line-based parsing of innerText ──
+// The listing page renders "Label\nValue" in its text, which is very reliable.
+const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
+for (let i = 0; i < lines.length - 1; i++) {
+  const label = lines[i].toLowerCase().replace(/:$/, '');
+  if (known.has(label) && !fields[label]) {
+    const val = lines[i + 1];
+    if (val && val.length < 80) fields[label] = val;
+  }
+}
+
+return fields;
+}`
+
+// fetchAndApplyDetailFields opens the listing detail page, runs detailJS to
+// extract an "Ad Details" field map, then calls ApplyDetailFields to merge
+// the result into the listing struct.
+func fetchAndApplyDetailFields(browser *rod.Browser, l *models.Listing, pageNum, cardIdx int) {
 	page, err := stealth.Page(browser)
 	if err != nil {
 		log.Printf("[page %d / card %d] detail stealth.Page: %v", pageNum, cardIdx, err)
-		return nil
+		return
 	}
 	defer func() { _ = page.Close() }()
 
-	if err := page.Timeout(20 * time.Second).Navigate(url); err != nil {
+	if err := page.Timeout(20 * time.Second).Navigate(l.URL); err != nil {
 		log.Printf("[page %d / card %d] detail navigate: %v", pageNum, cardIdx, err)
-		return nil
+		return
 	}
-	// Wait for the body to settle; a timeout here is non-fatal.
 	if werr := page.Timeout(10 * time.Second).WaitLoad(); werr != nil {
 		log.Printf("[page %d / card %d] detail WaitLoad (continuing): %v", pageNum, cardIdx, werr)
 	}
 
-	res, err := page.Eval(`() => document.body.innerText`)
+	res, err := page.Eval(detailJS)
 	if err != nil {
-		log.Printf("[page %d / card %d] detail innerText eval: %v", pageNum, cardIdx, err)
-		return nil
-	}
-	text := res.Value.Str()
-
-	mileage := ParseMileage(text)
-	if mileage != nil {
-		log.Printf("[page %d / card %d] detail mileage: %d", pageNum, cardIdx, *mileage)
-	} else {
-		log.Printf("[page %d / card %d] detail mileage: not found", pageNum, cardIdx)
+		log.Printf("[page %d / card %d] detail JS eval: %v", pageNum, cardIdx, err)
+		return
 	}
 
-	// Brief human-like pause before returning.
+	// Convert the JS object into a Go map[string]string.
+	fields := make(map[string]string)
+	for k, v := range res.Value.Map() {
+		fields[k] = v.Str()
+	}
+
+	// Also grab full body text as fallback for mileage regex.
+	var fullText string
+	if txt, err := page.Eval(`() => document.body.innerText`); err == nil {
+		fullText = txt.Value.Str()
+	}
+
+	ApplyDetailFields(fields, fullText, l)
+
+	log.Printf("[page %d / card %d] detail fields — mileage:%v bodyType:%q drive:%q cylinders:%q steering:%q onIsland:%v",
+		pageNum, cardIdx, l.Mileage, l.BodyType, l.Drive, l.Cylinders, l.Steering, l.OnIsland)
+
+	// Brief human-like pause.
 	time.Sleep(time.Duration(400+rand.Intn(400)) * time.Millisecond)
-	return mileage
 }
 
 // hasNextPage checks whether a link to the next page number exists in the DOM.

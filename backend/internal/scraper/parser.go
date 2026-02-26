@@ -201,3 +201,86 @@ func ParseMileage(text string) *int {
 	}
 	return try(mileageApproxRe)
 }
+
+// ApplyDetailFields merges a structured key→value map (extracted from an "Ad
+// Details" section) and the full page text into a Listing. Existing non-zero
+// values are not overwritten so card-level data always wins.
+func ApplyDetailFields(fields map[string]string, fullText string, l *models.Listing) {
+	get := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := fields[k]; ok && v != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+		return ""
+	}
+
+	if l.Mileage == nil {
+		// Try the structured fields map first (most reliable).
+		if raw := get("mileage"); raw != "" {
+			l.Mileage = parseMileageValue(raw)
+		}
+		// Fall back to full-text regex when the map had nothing.
+		if l.Mileage == nil && fullText != "" {
+			l.Mileage = ParseMileage(fullText)
+		}
+	}
+
+	if l.Condition == "" {
+		l.Condition = get("condition")
+	}
+	if l.Transmission == "" {
+		l.Transmission = get("transmission")
+	}
+	if l.FuelType == "" {
+		l.FuelType = get("fuel type", "fuel_type")
+	}
+	if l.Color == "" {
+		l.Color = get("exterior color", "color")
+	}
+	if l.BodyType == "" {
+		l.BodyType = get("body type", "body_type")
+	}
+	if l.Drive == "" {
+		l.Drive = get("drive")
+	}
+	if l.Cylinders == "" {
+		l.Cylinders = get("cylinders")
+	}
+	if l.Steering == "" {
+		l.Steering = get("steering")
+	}
+	if l.InteriorColor == "" {
+		l.InteriorColor = get("interior color", "interior_color")
+	}
+	if l.Doors == "" {
+		l.Doors = get("doors")
+	}
+	if l.OnIsland == nil {
+		if raw := get("on island", "on_island"); raw != "" {
+			yes := strings.EqualFold(raw, "yes") || strings.EqualFold(raw, "true")
+			l.OnIsland = &yes
+		}
+	}
+	// Year from detail page (only override if not already set from card text).
+	if l.Year == nil {
+		if raw := get("year"); raw != "" {
+			if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 1900 && v <= 2100 {
+				l.Year = &v
+			}
+		}
+	}
+}
+
+// parseMileageValue converts a raw mileage string (e.g. "Over 100,000" or
+// "48,050") into an integer, applying the same sanity bounds as ParseMileage.
+func parseMileageValue(raw string) *int {
+	// Strip leading "over"/"under"/"approx" qualifier.
+	raw = regexp.MustCompile(`(?i)^(over|under|approx\.?)\s+`).ReplaceAllString(raw, "")
+	digits := strings.ReplaceAll(digitsRe.FindString(raw), ",", "")
+	v, err := strconv.Atoi(digits)
+	if err != nil || v < 100 || v > 2_000_000 {
+		return nil
+	}
+	return &v
+}
