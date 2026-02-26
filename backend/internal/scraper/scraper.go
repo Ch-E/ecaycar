@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,19 +17,28 @@ import (
 )
 
 const (
-	listingsURL = "https://ecaytrade.com/autos-boats/autos"
-
-	// cardSelector matches all advert listing anchor elements on the page.
-	cardSelector = `a[href*="/advert/"]`
+	// minPrice is the minimum listing price — applied both in the URL filter
+	// and as a code-level safety net.
+	minPrice        = 4000
+	baseListingsURL = "https://ecaytrade.com/autos-boats/autos?minprice=4000"
+	cardSelector    = `a[href*="/advert/"]`
 )
 
-// Scrape launches a browser, navigates to the ecaytrade autos listing page,
-// and returns all parsed listings found on the first page.
+// Scrape launches a browser and scrapes ALL pages of the autos listing,
+// applying filters and returning only qualifying car listings.
+// Set MAX_PAGES env var to limit pages (e.g. MAX_PAGES=3 for testing).
 func Scrape() ([]models.Listing, error) {
 	headless := strings.EqualFold(os.Getenv("HEADLESS"), "true")
-	log.Printf("Launching browser (headless=%v)...", headless)
+	maxPages := 0 // 0 = no limit
+	if v := os.Getenv("MAX_PAGES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			maxPages = n
+		}
+	}
 
-	// Leakless(false) disables the leakless.exe helper binary that Windows Defender
+	log.Printf("Launching browser (headless=%v, maxPages=%d)...", headless, maxPages)
+
+	// Leakless(false) disables the leakless.exe helper that Windows Defender
 	// incorrectly flags as malware (known false positive with go-rod on Windows).
 	l := launcher.New().Headless(headless).Leakless(false)
 	u, err := l.Launch()
@@ -43,72 +53,139 @@ func Scrape() ([]models.Listing, error) {
 		}
 	}()
 
-	// stealth.Page creates the page AND injects all anti-detection scripts
-	// before any navigation -- this is the correct way to use go-rod/stealth.
+	var allListings []models.Listing
+	pageNum := 1
+
+	for {
+		if maxPages > 0 && pageNum > maxPages {
+			log.Printf("Reached MAX_PAGES=%d, stopping.", maxPages)
+			break
+		}
+
+		url := baseListingsURL
+		if pageNum > 1 {
+			url = fmt.Sprintf("%s&page=%d", baseListingsURL, pageNum)
+		}
+
+		listings, hasNext, rawCount, err := scrapePage(browser, url, pageNum)
+		if err != nil {
+			log.Printf("[page %d] error: %v — stopping pagination", pageNum, err)
+			break
+		}
+		// Stop only when the page returned zero raw cards (true end of listings).
+		// A page full of filtered-out parts is not a stopping condition.
+		if rawCount == 0 {
+			log.Printf("[page %d] no raw cards found — end of listings", pageNum)
+			break
+		}
+
+		allListings = append(allListings, listings...)
+		log.Printf("[page %d] accepted %d listing(s) — total so far: %d", pageNum, len(listings), len(allListings))
+
+		if !hasNext {
+			log.Printf("[page %d] no next page found — done", pageNum)
+			break
+		}
+
+		pageNum++
+
+		// Human-like delay between pages (2–3.5 s)
+		delay := time.Duration(2000+rand.Intn(1500)) * time.Millisecond
+		log.Printf("Waiting %v before page %d...", delay, pageNum)
+		time.Sleep(delay)
+	}
+
+	log.Printf("Scrape complete: %d pages, %d total listings", pageNum, len(allListings))
+	return allListings, nil
+}
+
+// scrapePage scrapes a single URL and returns filtered listings, whether
+// a next page exists, and the raw (unfiltered) card count.
+func scrapePage(browser *rod.Browser, url string, pageNum int) (listings []models.Listing, hasNext bool, rawCount int, err error) {
 	page, err := stealth.Page(browser)
 	if err != nil {
-		return nil, fmt.Errorf("stealth.Page: %w", err)
+		return nil, false, 0, fmt.Errorf("stealth.Page: %w", err)
+	}
+	defer func() { _ = page.Close() }()
+
+	log.Printf("[page %d] navigating to %s", pageNum, url)
+	if err = page.Navigate(url); err != nil {
+		return nil, false, 0, fmt.Errorf("navigate: %w", err)
+	}
+	// WaitLoad with a graceful timeout — some pages fire load late, which is fine
+	// as long as the card selector appears afterwards.
+	if werr := page.Timeout(20 * time.Second).WaitLoad(); werr != nil {
+		log.Printf("[page %d] WaitLoad timed out (continuing anyway): %v", pageNum, werr)
 	}
 
-	log.Printf("Navigating to %s ...", listingsURL)
-	if err := page.Navigate(listingsURL); err != nil {
-		return nil, fmt.Errorf("navigate: %w", err)
-	}
-
-	// Wait for the document to finish loading.
-	page.MustWaitLoad()
-
-	// Additionally wait for at least one listing card anchor to appear.
-	log.Println("Waiting for listing cards in DOM...")
-	if err := waitForSelector(page, cardSelector, 30*time.Second); err != nil {
+	if werr := waitForSelector(page, cardSelector, 30*time.Second); werr != nil {
 		html, _ := page.HTML()
-		log.Printf("Page HTML dump (first 3000 chars):\n%s", truncate(html, 3000))
-		return nil, fmt.Errorf("listing cards never appeared: %w", err)
+		log.Printf("[page %d] listing cards never appeared — HTML dump:\n%s", pageNum, truncate(html, 3000))
+		return nil, false, 0, nil // treat as empty page, not a fatal error
 	}
 
-	// Random human-like pause (2-3 s) before extracting.
-	delay := time.Duration(2000+rand.Intn(1000)) * time.Millisecond
-	log.Printf("Sleeping %v (human delay)...", delay)
+	// Human-like pause before extracting
+	delay := time.Duration(1500+rand.Intn(1000)) * time.Millisecond
+	log.Printf("[page %d] sleeping %v...", pageNum, delay)
 	time.Sleep(delay)
 
-	// Extract raw card data via a single JS round-trip.
-	log.Println("Extracting cards via JS eval...")
 	cards, err := extractCards(page)
 	if err != nil {
-		return nil, fmt.Errorf("extractCards: %w", err)
+		return nil, false, 0, fmt.Errorf("extractCards: %w", err)
 	}
-	log.Printf("Found %d raw card(s)", len(cards))
+	rawCount = len(cards)
+	log.Printf("[page %d] found %d raw card(s)", pageNum, rawCount)
 
-	var listings []models.Listing
+	// Detect next page: look for a link to page N+1
+	hasNext = hasNextPage(page, pageNum)
+
 	for i, c := range cards {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[card %d] panic: %v", i, r)
+					log.Printf("[page %d / card %d] panic: %v", pageNum, i, r)
 				}
 			}()
-			listing := ParseCard(c.Text, c.URL, c.ImgSrc)
-			if listing.Title == "" && listing.Price == 0 {
-				log.Printf("[card %d] skipped -- empty title+price (url=%s)", i, c.URL)
+			l := ParseCard(c.Text, c.URL, c.ImgSrc)
+			if l.Title == "" && l.Price == 0 {
 				return
 			}
-			if listing.Year == nil {
-				log.Printf("[card %d] skipped — no year (likely a part/accessory): %s", i, listing.Title)
+			if l.Year == nil {
+				log.Printf("[page %d / card %d] skip — no year: %s", pageNum, i, l.Title)
 				return
 			}
-			if listing.Price < 1000 {
-				log.Printf("[card %d] skipped — price too low (CI$%.0f): %s", i, listing.Price, listing.Title)
+			if l.Price < minPrice {
+				log.Printf("[page %d / card %d] skip — price too low (CI$%.0f): %s", pageNum, i, l.Price, l.Title)
 				return
 			}
-			if strings.Contains(strings.ToLower(listing.Title), "price upon request") {
-				log.Printf("[card %d] skipped — price upon request: %s", i, listing.Title)
+			if strings.Contains(strings.ToLower(l.Title), "price upon request") {
+				log.Printf("[page %d / card %d] skip — price upon request", pageNum, i)
 				return
 			}
-			listings = append(listings, listing)
+			listings = append(listings, l)
 		}()
 	}
 
-	return listings, nil
+	return listings, hasNext, rawCount, nil
+}
+
+// hasNextPage checks whether a link to the next page number exists in the DOM.
+func hasNextPage(page *rod.Page, currentPage int) bool {
+	nextPage := currentPage + 1
+	result, err := page.Eval(fmt.Sprintf(`() => {
+		const links = document.querySelectorAll('a[href]');
+		for (const a of links) {
+			const href = a.href || '';
+			if (href.includes('page=%d')) return true;
+			if (a.getAttribute('aria-label') === 'Next page') return true;
+			if (a.rel === 'next') return true;
+		}
+		return false;
+	}`, nextPage))
+	if err != nil {
+		return false
+	}
+	return result.Value.Bool()
 }
 
 // rawCard holds the DOM data extracted by the JS snippet.
