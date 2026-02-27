@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ecaytracker/backend/models"
+	"ecaycar/backend/models"
 )
 
 var (

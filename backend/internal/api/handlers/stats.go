@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	appdb "ecaytracker/backend/internal/db"
+	appdb "ecaycar/backend/internal/db"
 )
 
 // Stats handles GET /api/stats.

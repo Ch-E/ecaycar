@@ -13,7 +13,7 @@ import (
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/stealth"
 
-	"ecaytracker/backend/models"
+	"ecaycar/backend/models"
 )
 
 const (

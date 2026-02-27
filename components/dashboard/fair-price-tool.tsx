@@ -13,20 +13,35 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { carListings } from "@/lib/mock-data"
+import type { ApiListing } from "@/lib/api"
 import { Calculator, TrendingDown, TrendingUp, Minus } from "lucide-react"
 
-const makes = Array.from(new Set(carListings.map((c) => c.make))).sort()
+type AnyListing = { make: string; model: string; year: number; price: number; mileage: number }
 
-function getModelsForMake(make: string) {
+function toAny(listings: ApiListing[]): AnyListing[] {
+  return listings
+    .filter((l) => l.make && l.model && l.year != null && l.price > 0 && l.mileage != null)
+    .map((l) => ({ make: l.make, model: l.model, year: l.year!, price: l.price, mileage: l.mileage! }))
+}
+
+const mockListings: AnyListing[] = carListings.map((c) => ({
+  make: c.make, model: c.model, year: c.year, price: c.fairPrice, mileage: c.mileage,
+}))
+
+function getMakes(listings: AnyListing[]) {
+  return Array.from(new Set(listings.map((c) => c.make))).sort()
+}
+
+function getModelsForMake(listings: AnyListing[], make: string) {
   return Array.from(
-    new Set(carListings.filter((c) => c.make === make).map((c) => c.model))
+    new Set(listings.filter((c) => c.make === make).map((c) => c.model))
   ).sort()
 }
 
-function getYearsForMakeModel(make: string, model: string) {
+function getYearsForMakeModel(listings: AnyListing[], make: string, model: string) {
   return Array.from(
     new Set(
-      carListings
+      listings
         .filter((c) => c.make === make && c.model === model)
         .map((c) => c.year)
     )
@@ -41,15 +56,16 @@ interface Estimation {
 }
 
 function estimatePrice(
+  listings: AnyListing[],
   make: string,
   model: string,
   year: number,
   mileage: number
 ): Estimation | null {
-  const comparables = carListings.filter((c) => c.make === make)
+  const comparables = listings.filter((c) => c.make === make)
   if (comparables.length === 0) return null
 
-  const exactMatch = carListings.filter(
+  const exactMatch = listings.filter(
     (c) => c.make === make && c.model === model
   )
 
@@ -58,14 +74,14 @@ function estimatePrice(
 
   if (exactMatch.length >= 2) {
     basePrice =
-      exactMatch.reduce((sum, c) => sum + c.fairPrice, 0) / exactMatch.length
+      exactMatch.reduce((sum, c) => sum + c.price, 0) / exactMatch.length
     confidence = "High"
   } else if (exactMatch.length === 1) {
-    basePrice = exactMatch[0].fairPrice
+    basePrice = exactMatch[0].price
     confidence = "Medium"
   } else {
     basePrice =
-      comparables.reduce((sum, c) => sum + c.fairPrice, 0) / comparables.length
+      comparables.reduce((sum, c) => sum + c.price, 0) / comparables.length
     confidence = "Low"
   }
 
@@ -94,7 +110,16 @@ function estimatePrice(
   }
 }
 
-export function FairPriceTool() {
+interface FairPriceToolProps {
+  listings?: ApiListing[]
+}
+
+export function FairPriceTool({ listings }: FairPriceToolProps) {
+  const allListings = useMemo<AnyListing[]>(
+    () => (listings && listings.length > 0 ? toAny(listings) : mockListings),
+    [listings]
+  )
+
   const [make, setMake] = useState("")
   const [model, setModel] = useState("")
   const [year, setYear] = useState("")
@@ -102,15 +127,17 @@ export function FairPriceTool() {
   const [result, setResult] = useState<Estimation | null>(null)
   const [showResult, setShowResult] = useState(false)
 
-  const models = useMemo(() => (make ? getModelsForMake(make) : []), [make])
+  const makes = useMemo(() => getMakes(allListings), [allListings])
+  const models = useMemo(() => (make ? getModelsForMake(allListings, make) : []), [make, allListings])
   const years = useMemo(
-    () => (make && model ? getYearsForMakeModel(make, model) : []),
-    [make, model]
+    () => (make && model ? getYearsForMakeModel(allListings, make, model) : []),
+    [make, model, allListings]
   )
 
   function handleEstimate() {
     if (!make || !mileage) return
     const est = estimatePrice(
+      allListings,
       make,
       model,
       year ? parseInt(year) : 2022,

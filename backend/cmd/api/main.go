@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"ecaytracker/backend/config"
-	"ecaytracker/backend/internal/api"
-	appdb "ecaytracker/backend/internal/db"
+	"ecaycar/backend/config"
+	"ecaycar/backend/internal/api"
+	appdb "ecaycar/backend/internal/db"
 )
 
 func main() {

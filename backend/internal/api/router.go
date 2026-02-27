@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"ecaytracker/backend/internal/api/handlers"
+	"ecaycar/backend/internal/api/handlers"
 )
 
 // NewRouter creates and configures the Gin engine with all routes and middleware.

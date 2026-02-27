@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"ecaytracker/backend/models"
+	"ecaycar/backend/models"
 )
 
 // UpsertResult describes what happened when a listing was upserted.

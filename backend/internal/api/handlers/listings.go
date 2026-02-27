@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	appdb "ecaytracker/backend/internal/db"
-	"ecaytracker/backend/models"
+	appdb "ecaycar/backend/internal/db"
+	"ecaycar/backend/models"
 )
 
 // Listings handles GET /api/listings.

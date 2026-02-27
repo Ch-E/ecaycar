@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 
-	"ecaytracker/backend/config"
-	appdb "ecaytracker/backend/internal/db"
-	"ecaytracker/backend/internal/scraper"
+	"ecaycar/backend/config"
+	appdb "ecaycar/backend/internal/db"
+	"ecaycar/backend/internal/scraper"
 )
 
 func main() {

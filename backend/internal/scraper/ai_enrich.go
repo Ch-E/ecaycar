@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"ecaytracker/backend/models"
+	"ecaycar/backend/models"
 )
 
 const (

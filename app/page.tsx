@@ -24,7 +24,7 @@ export default async function DashboardPage() {
           <KpiCards stats={stats} />
 
           {/* Fair Price Estimator */}
-          <FairPriceTool />
+          <FairPriceTool listings={listings} />
 
           {/* Charts Row 1: Price Trends + Brand Distribution */}
           <div className="grid gap-6 lg:grid-cols-2">

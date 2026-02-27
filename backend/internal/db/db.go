@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"ecaytracker/backend/config"
+	"ecaycar/backend/config"
 )
 
 // InitDB creates a pgxpool connection pool, pings the database, and returns

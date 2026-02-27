@@ -1,4 +1,4 @@
-module ecaytracker/backend
+module ecaycar/backend
 
 go 1.23
 
