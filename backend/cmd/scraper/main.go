@@ -22,6 +22,8 @@ func main() {
 	defer pool.Close()
 	log.Println("Database connected.")
 
+	ctx := context.Background()
+
 	listings, err := scraper.Scrape()
 	if err != nil {
 		log.Fatalf("Scrape failed: %v", err)
@@ -29,9 +31,12 @@ func main() {
 	if len(listings) == 0 {
 		log.Fatal("No listings extracted — selectors may need updating or Cloudflare blocked the request.")
 	}
-	log.Printf("Scraped %d listing(s). Upserting to database…", len(listings))
+	log.Printf("Scraped %d listing(s). Running AI enrichment…", len(listings))
 
-	ctx := context.Background()
+	listings = scraper.EnrichListings(ctx, listings, cfg.GitHubToken)
+
+	log.Printf("Upserting %d listing(s) to database…", len(listings))
+
 	var inserted, updated, priceChanged int
 
 	for _, l := range listings {

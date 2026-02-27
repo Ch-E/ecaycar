@@ -14,6 +14,7 @@ type Config struct {
 	Port        string
 	FrontendURL string
 	Env         string
+	GitHubToken string
 }
 
 // Load reads the .env file (if present) then maps env vars into a Config.
@@ -28,6 +29,7 @@ func Load() *Config {
 		Port:        getEnvOrDefault("PORT", "8080"),
 		FrontendURL: getEnvOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		Env:         getEnvOrDefault("ENV", "development"),
+		GitHubToken: os.Getenv("GITHUB_TOKEN"),
 	}
 
 	if cfg.DatabaseURL == "" {
